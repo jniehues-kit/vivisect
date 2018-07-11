@@ -19,7 +19,7 @@ def flatten(tensors):
         return [tensors]
 
 
-def probe(model, host, port, select=lambda x : True, perform=lambda m, i, iv, ov : True):
+def probe(model, host="localhost", port=8082, select=lambda x : True, perform=lambda m, i, iv, ov : True,cb=None):
     assert(isinstance(model, nn.Module))
     def callback(module, ivars, ovars):
         iteration = model._vivisect["iteration"]
@@ -30,21 +30,25 @@ def probe(model, host, port, select=lambda x : True, perform=lambda m, i, iv, ov
             #metadata["input_names"] = [ivar for ivar in ivars],
             metadata["op_name"] = module._vivisect["name"]
             params = {k : v.data.tolist() for k, v in module.named_parameters()}
-            r = Request("http://{}:{}".format(host, port),
-                        method="POST",
-                        headers={"Content-Type" : "application/json"},
-                        data=json.dumps({"inputs" : [(ivar.data.tolist() if hasattr(ivar, "data") else []) for ivar in ivars],
-                                         "outputs" : [(v.data.tolist() if hasattr(v, "data") else []) for v in flatten(ovars)],                                         
+            data={"inputs" : [(ivar.data.tolist() if hasattr(ivar, "data") else []) for ivar in ivars],
+                                         "outputs" : [(v.data.tolist() if hasattr(v, "data") else []) for v in flatten(ovars)],
                                          "parameters" : params,
                                          "metadata" : metadata,
-                        }).encode())
-            urlopen(r)
+                        }
+            if(cb):
+                cb(data)
+            else:
+                r = Request("http://{}:{}".format(host, port),
+                        method="POST",
+                        headers={"Content-Type" : "application/json"},
+                        data=json.dumps(data).encode())
+                urlopen(r)
             
     for name, submodule in model.named_modules():
         submodule._vivisect = getattr(submodule, "_vivisect", {})
         submodule._vivisect["name"] = name
         if select(submodule):
-            submodule.register_forward_hook(callback) 
+            submodule.register_forward_hook(callback)
 
 
 class mlp(nn.Module):

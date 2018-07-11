@@ -17,21 +17,26 @@ import logging
 from types import MethodType
 
 
-def probe(model, host, port, select=lambda x : True, perform=lambda m, i, iv, ov : True):
+def probe(model, host="localhost", port=8082, select=lambda x : True, perform=lambda m, i, iv, ov : True,cb=None):
     assert(isinstance(model, (Block, mxnet.module.BaseModule)))
     if isinstance(model, Block):
         def callback(op, ivars, ovars):
             if perform(model, op, ivars, ovars):
                 metadata = {k : v for k, v in getattr(model, "_vivisect", {}).items()}
                 metadata["op_name"] = op.name
-                r = Request("http://{}:{}".format(host, port),
-                            method="POST",
-                            headers={"Content-Type" : "application/json"},
-                            data=json.dumps({"outputs" : [ovar.asnumpy().tolist() for ovar in (ovars if isinstance(ovars, list) else [ovars])],
+                data= {"outputs" : [ovar.asnumpy().tolist() for ovar in (ovars if isinstance(ovars, list) else [ovars])],
                                              "inputs" : [ivar.asnumpy().tolist() for ivar in ivars],
                                              "metadata" : metadata,
-                            }).encode())
-                urlopen(r)
+                            }
+                if(cb):
+                        cb(data)
+                else:
+                    r = Request("http://{}:{}".format(host, port),
+                            method="POST",
+                            headers={"Content-Type" : "application/json"},
+                            data=json.dumps(data).encode())
+                    urlopen(r)
+
         def register(m):
             if select(m):
                 m.register_forward_hook(callback)
@@ -43,14 +48,18 @@ def probe(model, host, port, select=lambda x : True, perform=lambda m, i, iv, ov
             retval = self.forward_(*args, **argdict)
             metadata = {k : v for k, v in getattr(model, "_vivisect").items()}
             metadata["op_name"] = self._symbol.name
-            r = Request("http://{}:{}".format(host, port),
-                        method="POST",
-                        headers={"Content-Type" : "application/json"},                        
-                        data=json.dumps({"outputs" : [o.asnumpy().tolist() for o in retval],
+            data={"outputs" : [o.asnumpy().tolist() for o in retval],
                                          "inputs" : [],
                                          "metadata" : metadata,
-            }).encode())
-            urlopen(r)
+            }
+            if(cb):
+                cb(data)
+            else:
+                r = Request("http://{}:{}".format(host, port),
+                        method="POST",
+                        headers={"Content-Type" : "application/json"},                        
+                        data=json.dumps(data).encode())
+                urlopen(r)
 
 
             #print(retval)
